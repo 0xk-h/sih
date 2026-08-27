@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: airfare_db
+    environment:
+      POSTGRES_USER: airfare
+      POSTGRES_PASSWORD: airfare123
+      POSTGRES_DB: airfare_index
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - airfare_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airfare -d airfare_index"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: airfare_backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://airfare:airfare123@db:5432/airfare_index
+      AMADEUS_CLIENT_ID: ${AMADEUS_CLIENT_ID:-}
+      AMADEUS_CLIENT_SECRET: ${AMADEUS_CLIENT_SECRET:-}
+      AMADEUS_BASE_URL: ${AMADEUS_BASE_URL:-https://test.api.amadeus.com}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        cd /data/seed && python generate_seed.py &&
+        cd /app && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    working_dir: /app
+    networks:
+      - airfare_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: airfare_frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - airfare_net
+
+networks:
+  airfare_net:
+    driver: bridge
+
+volumes:
+  pg_data:
