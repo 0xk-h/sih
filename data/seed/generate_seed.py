@@ -186,23 +186,20 @@ def run_seed():
         for origin_iata, dest_iata, distance_km, weight in ROUTES:
             orig_id = airport_ids[origin_iata]
             dest_id = airport_ids[dest_iata]
-            result = db.execute(text("""
-                INSERT INTO routes (origin_airport_id, dest_airport_id, distance_km)
-                VALUES (:orig, :dest, :dist)
-                ON CONFLICT DO NOTHING
-                RETURNING route_id
-            """), {"orig": orig_id, "dest": dest_id, "dist": distance_km}).fetchone()
-            if result:
+            # Check if route already exists to prevent duplicates on rebuild
+            existing = db.execute(text("""
+                SELECT route_id FROM routes
+                WHERE origin_airport_id = :orig AND dest_airport_id = :dest
+            """), {"orig": orig_id, "dest": dest_id}).fetchone()
+            if existing:
+                route_ids[f"{origin_iata}-{dest_iata}"] = existing.route_id
+            else:
+                result = db.execute(text("""
+                    INSERT INTO routes (origin_airport_id, dest_airport_id, distance_km)
+                    VALUES (:orig, :dest, :dist)
+                    RETURNING route_id
+                """), {"orig": orig_id, "dest": dest_id, "dist": distance_km}).fetchone()
                 route_ids[f"{origin_iata}-{dest_iata}"] = result.route_id
-        if not route_ids:
-            # Already exist
-            rows = db.execute(text("""
-                SELECT r.route_id, o.iata_code || '-' || d.iata_code AS label
-                FROM routes r
-                JOIN airports o ON o.airport_id = r.origin_airport_id
-                JOIN airports d ON d.airport_id = r.dest_airport_id
-            """)).fetchall()
-            route_ids = {row.label: row.route_id for row in rows}
         db.commit()
         print(f"  → {len(route_ids)} routes seeded: {list(route_ids.keys())}")
 
